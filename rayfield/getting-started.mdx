@@ -1,40 +1,153 @@
----
-title: Loading the library
-description: How to load Rayfield into your script and enable configuration saving.
----
+-- =============================================
+-- ESTRUTURA BASE PARA AIMBOT NO ROBLOX
+-- (Código para você construir seu próprio script)
+-- =============================================
 
-<Note>
-  **Share your script with the community.**
+-- 1. SERVIÇOS E CONFIGURAÇÕES
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local localPlayer = Players.LocalPlayer
+local camera = workspace.CurrentCamera
 
-  Publish your script on [RoScripts](https://roscripts.io) so players can find your script.
-</Note>
+-- Configurações que você pode ajustar
+local CONFIG = {
+    Alcance = 200,           -- Distância máxima para detectar alvos
+    Suavidade = 0.15,        -- Velocidade da mira (menos = mais rápido)
+    TeclaAtivar = Enum.KeyCode.L,  -- Tecla para ligar/desligar
+    MirarNaCabeca = true,    -- true = cabeça, false = torso
+    VerificarParede = true   -- true = não mira através de paredes
+}
 
-## Load Rayfield
+-- 2. ESTADO DO AIMBOT
+local aimbotAtivo = false
+local alvoAtual = nil
 
-Add the following line at the top of your script to load the Rayfield library.
+-- 3. FUNÇÃO PARA VERIFICAR VISIBILIDADE (Wall Check)
+local function isVisible(targetPart)
+    if not targetPart then return false end
+    
+    local origin = camera.CFrame.Position
+    local direction = (targetPart.Position - origin)
+    
+    local rayParams = RaycastParams.new()
+    rayParams.FilterDescendantsInstances = {localPlayer.Character}
+    rayParams.FilterType = Enum.RaycastFilterType.Blacklist
+    
+    local result = workspace:Raycast(origin, direction, rayParams)
+    
+    if result and result.Instance:IsDescendantOf(targetPart.Parent) then
+        return true
+    end
+    return false
+end
 
-```lua
-local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
-```
+-- 4. FUNÇÃO PARA ENCONTRAR O ALVO MAIS PRÓXIMO
+local function getNearestTarget()
+    local closest = nil
+    local shortestDistance = CONFIG.Alcance
+    
+    for _, otherPlayer in pairs(Players:GetPlayers()) do
+        if otherPlayer ~= localPlayer and otherPlayer.Character then
+            -- Escolhe entre cabeça ou torso
+            local targetPart = CONFIG.MirarNaCabeca and 
+                otherPlayer.Character:FindFirstChild("Head") or 
+                otherPlayer.Character:FindFirstChild("HumanoidRootPart")
+            
+            local humanoid = otherPlayer.Character:FindFirstChild("Humanoid")
+            
+            if targetPart and humanoid and humanoid.Health > 0 then
+                local distance = (targetPart.Position - camera.CFrame.Position).Magnitude
+                
+                -- Verifica se está no alcance e visível
+                if distance < shortestDistance then
+                    if not CONFIG.VerificarParede or isVisible(targetPart) then
+                        shortestDistance = distance
+                        closest = targetPart
+                    end
+                end
+            end
+        end
+    end
+    
+    return closest
+end
 
-## Enable configuration saving
+-- 5. FUNÇÃO PARA MIRAR NO ALVO (com suavidade)
+local function aimAtTarget(target)
+    if not target then return end
+    
+    -- Posição para mirar (com ajuste)
+    local targetPosition = target.Position
+    
+    -- Suavidade da mira (movimento mais natural)
+    local currentCFrame = camera.CFrame
+    local targetCFrame = CFrame.new(currentCFrame.Position, targetPosition)
+    
+    -- Interpolação suave entre posição atual e alvo
+    camera.CFrame = currentCFrame:lerp(targetCFrame, CONFIG.Suavidade)
+end
 
-Configuration saving lets Rayfield automatically persist and restore element values across sessions.
+-- 6. LOOP PRINCIPAL (executa a cada frame)
+RunService.RenderStepped:Connect(function()
+    if not aimbotAtivo then return end
+    
+    -- Encontra o melhor alvo
+    if not alvoAtual or not alvoAtual.Parent then
+        alvoAtual = getNearestTarget()
+    end
+    
+    -- Verifica se o alvo ainda é válido
+    if alvoAtual and alvoAtual.Parent then
+        local humanoid = alvoAtual.Parent:FindFirstChild("Humanoid")
+        if humanoid and humanoid.Health > 0 then
+            if not CONFIG.VerificarParede or isVisible(alvoAtual) then
+                aimAtTarget(alvoAtual)
+                return
+            end
+        end
+    end
+    
+    alvoAtual = nil
+end)
 
-<Steps>
-  <Step title="Enable ConfigurationSaving in CreateWindow">
-    Set `ConfigurationSaving.Enabled` to `true` and provide a `FileName` when calling `CreateWindow`.
-  </Step>
-  <Step title="Set a unique flag on each element">
-    Every element that supports configuration saving has a `Flag` field. Make sure each flag is unique to avoid conflicts.
-  </Step>
-  <Step title="Call LoadConfiguration at the end of your script">
-    Place `Rayfield:LoadConfiguration()` after all your elements have been created.
+-- 7. SISTEMA DE ATIVAÇÃO/DESATIVAÇÃO (Tecla e GUI)
+-- Ativação por tecla
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+    if input.KeyCode == CONFIG.TeclaAtivar then
+        aimbotAtivo = not aimbotAtivo
+        alvoAtual = nil
+        print("Aimbot:", aimbotAtivo and "ATIVADO" or "DESATIVADO")
+    end
+end)
 
-    ```lua
-    Rayfield:LoadConfiguration()
-    ```
-  </Step>
-</Steps>
+-- Cria um botão simples na tela (opcional)
+local function criarBotaoGUI()
+    local screenGui = Instance.new("ScreenGui")
+    screenGui.Name = "AimbotGUI"
+    screenGui.Parent = localPlayer:WaitForChild("PlayerGui")
+    screenGui.ResetOnSpawn = false
+    
+    local button = Instance.new("TextButton")
+    button.Size = UDim2.new(0, 120, 0, 40)
+    button.Position = UDim2.new(0.5, -60, 0.9, 0)
+    button.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+    button.TextColor3 = Color3.new(1, 1, 1)
+    button.TextScaled = true
+    button.Text = "Aimbot: OFF"
+    button.Parent = screenGui
+    button.BorderSizePixel = 0
+    
+    button.MouseButton1Click:Connect(function()
+        aimbotAtivo = not aimbotAtivo
+        alvoAtual = nil
+        button.Text = aimbotAtivo and "Aimbot: ON" or "Aimbot: OFF"
+        button.BackgroundColor3 = aimbotAtivo and Color3.fromRGB(0, 170, 0) or Color3.fromRGB(30, 30, 30)
+    end)
+end
 
-Rayfield will now automatically save and restore your configuration on each load.
+criarBotaoGUI()
+
+print("=== SCRIPT BASE CARREGADO ===")
+print("Pressione", CONFIG.TeclaAtivar.Name, "para ativar/desativar")
